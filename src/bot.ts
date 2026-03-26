@@ -762,18 +762,33 @@ function getHrTeamEmoji(team: HrTeam | null): string {
 }
 
 function getHrFormsListMarkup(forms: FormRecord[]) {
-  return Markup.inlineKeyboard(
-    forms.map((form) => {
-      const agent = getUser(form.agentTelegramId);
-      const sq = getSquadShort(agent?.squad ?? form.squad);
-      return [
-        Markup.button.callback(
-          `${sq ? sq + " " : ""}${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
-          `hrview:${form.id}`
-        )
-      ];
-    })
-  );
+  const pending = forms.filter((f) => f.workflowStatus === "на рассмотрении");
+  const other = forms.filter((f) => f.workflowStatus !== "на рассмотрении");
+
+  const makeButton = (form: FormRecord) => {
+    const agent = getUser(form.agentTelegramId);
+    const sq = getSquadShort(agent?.squad ?? form.squad);
+    return [
+      Markup.button.callback(
+        `${sq ? sq + " " : ""}${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
+        `hrview:${form.id}`
+      )
+    ];
+  };
+
+  const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+
+  if (pending.length > 0) {
+    buttons.push([Markup.button.callback(`── ⏳ На рассмотрении (${pending.length}) ──`, "noop")]);
+    for (const form of pending) buttons.push(makeButton(form));
+  }
+
+  if (other.length > 0) {
+    buttons.push([Markup.button.callback(`── 📋 В работе (${other.length}) ──`, "noop")]);
+    for (const form of other) buttons.push(makeButton(form));
+  }
+
+  return Markup.inlineKeyboard(buttons);
 }
 
 function getModerationListText(forms: FormRecord[]): string {
