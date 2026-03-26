@@ -893,7 +893,7 @@ function getAgentsListText(count: number): string {
     "<b>👥 Список пользователей</b>",
     `Всего пользователей: <b>${count}</b>`,
     "",
-    "Выберите пользователя из списка ниже:"
+    "Выберите команду:"
   ].join("\n");
 }
 
@@ -908,6 +908,37 @@ function getSquadShort(squad: Squad | null): string {
 
 function getAgentsListMarkup() {
   const users = getAllUsers();
+  const danCount = users.filter((u) => u.squad === "dan").length;
+  const aroirkenCount = users.filter((u) => u.squad === "aroirken").length;
+  const liamkizzCount = users.filter((u) => u.squad === "liamkizz").length;
+  const noSquadCount = users.filter((u) => !u.squad).length;
+
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(`🟦 Dan Squad (${danCount})`, "squadview:dan")],
+    [Markup.button.callback(`🟩 Aroirken Squad (${aroirkenCount})`, "squadview:aroirken")],
+    [Markup.button.callback(`🟨 LiamKizz Squad (${liamkizzCount})`, "squadview:liamkizz")],
+    [Markup.button.callback(`⚪ Без команды (${noSquadCount})`, "squadview:none")],
+    [Markup.button.callback(`👥 Все (${users.length})`, "squadview:all")]
+  ]);
+}
+
+function getSquadViewText(squad: string, count: number): string {
+  const title = squad === "all" ? "Все пользователи"
+    : squad === "none" ? "Без команды"
+    : getSquadText(squad as Squad);
+  return [
+    `<b>👥 ${title}</b>`,
+    `Пользователей: <b>${count}</b>`,
+    "",
+    "Выберите пользователя:"
+  ].join("\n");
+}
+
+function getSquadViewMarkup(squad: string) {
+  const users = getAllUsers();
+  const filtered = squad === "all" ? users
+    : squad === "none" ? users.filter((u) => !u.squad)
+    : users.filter((u) => u.squad === squad);
 
   const rolePriority: Role[] = ["owner", "admin", "hr", "hr_mason", "hr_huntme", "agent"];
   const roleLabels: Record<string, string> = {
@@ -925,7 +956,7 @@ function getAgentsListMarkup() {
 
   for (const role of rolePriority) {
     const group: UserRecord[] = [];
-    for (const user of users) {
+    for (const user of filtered) {
       if (!assigned.has(user.telegramId) && user.roles.includes(role)) {
         group.push(user);
         assigned.add(user.telegramId);
@@ -934,7 +965,7 @@ function getAgentsListMarkup() {
     if (group.length > 0) grouped.set(role, group);
   }
 
-  const noRole = users.filter((u) => !assigned.has(u.telegramId));
+  const noRole = filtered.filter((u) => !assigned.has(u.telegramId));
   if (noRole.length > 0) grouped.set("none", noRole);
 
   const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
@@ -952,6 +983,8 @@ function getAgentsListMarkup() {
       ]);
     }
   }
+
+  buttons.push([Markup.button.callback("← Назад к командам", "agentlist")]);
 
   return Markup.inlineKeyboard(buttons);
 }
@@ -2296,6 +2329,35 @@ bot.on("callback_query", async (ctx) => {
     await ctx.editMessageText(getAgentsListText(agents.length), {
       parse_mode: "HTML",
       ...getAgentsListMarkup()
+    });
+    return;
+  }
+
+  if (data.startsWith("squadview:")) {
+    if (!requireRole(ctx, ["owner"])) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const squad = data.split(":")[1];
+    const users = getAllUsers();
+    const filtered = squad === "all" ? users
+      : squad === "none" ? users.filter((u) => !u.squad)
+      : users.filter((u) => u.squad === squad);
+
+    await ctx.answerCbQuery();
+
+    if (filtered.length === 0) {
+      await ctx.editMessageText(getSquadViewText(squad, 0), {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("← Назад к командам", "agentlist")]])
+      });
+      return;
+    }
+
+    await ctx.editMessageText(getSquadViewText(squad, filtered.length), {
+      parse_mode: "HTML",
+      ...getSquadViewMarkup(squad)
     });
     return;
   }
