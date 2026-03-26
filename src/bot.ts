@@ -753,14 +753,26 @@ function getHrFormsListText(forms: FormRecord[]): string {
   ].join("\n");
 }
 
+function getHrTeamEmoji(team: HrTeam | null): string {
+  switch (team) {
+    case "mason": return "🔵";
+    case "huntme": return "🟠";
+    default: return "⚪";
+  }
+}
+
 function getHrFormsListMarkup(forms: FormRecord[]) {
   return Markup.inlineKeyboard(
-    forms.map((form) => [
-      Markup.button.callback(
-        `${getSquadShort(form.squad)} ${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
-        `hrview:${form.id}`
-      )
-    ])
+    forms.map((form) => {
+      const agent = getUser(form.agentTelegramId);
+      const sq = getSquadShort(agent?.squad ?? form.squad);
+      return [
+        Markup.button.callback(
+          `${sq ? sq + " " : ""}${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
+          `hrview:${form.id}`
+        )
+      ];
+    })
   );
 }
 
