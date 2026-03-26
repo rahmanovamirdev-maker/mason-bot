@@ -27,6 +27,7 @@ import {
   rejectAccessRequest,
   setUserActive,
   setUserRole,
+  setUserSquad,
   updateWorkflowStatus,
   upsertUser
 } from "./db.js";
@@ -37,10 +38,12 @@ import {
   FormType,
   HrTeam,
   Role,
+  Squad,
   UserRecord,
   WorkflowStatus,
   formTypes,
   roles,
+  squads,
   workflowStatuses
 } from "./types.js";
 
@@ -154,6 +157,19 @@ function getHrTeamByRole(role: Role | null): HrTeam | null {
       return "huntme";
     default:
       return null;
+  }
+}
+
+function getSquadText(squad: Squad | null): string {
+  switch (squad) {
+    case "dan":
+      return "🟦 Dan Squad";
+    case "aroirken":
+      return "🟩 Aroirken Squad";
+    case "liamkizz":
+      return "🟨 LiamKizz Squad";
+    default:
+      return "Не назначена";
   }
 }
 
@@ -693,6 +709,7 @@ function formatForm(form: FormRecord): string {
     "",
     `<b>Тип:</b> ${getFormTypeText(form.formType)}`,
     `<b>Направление HR:</b> ${escapeHtml(getHrTeamText(form.hrTeam))}`,
+    `<b>Команда:</b> ${getSquadText(form.squad)}`,
     `<b>${escapeHtml(getFormFieldLabel(form.formType, "candidateName"))}:</b> ${escapeHtml(form.candidateName)}`,
     `<b>${escapeHtml(getFormFieldLabel(form.formType, "age"))}:</b> ${escapeHtml(form.age)}`,
     `<b>${escapeHtml(getFormFieldLabel(form.formType, "city"))}:</b> ${escapeHtml(form.city)}`,
@@ -816,6 +833,7 @@ function formatAgentCard(user: {
   firstName: string;
   lastName: string | null;
   role: Role | null;
+  squad: Squad | null;
   isActive: boolean;
   accessRequestStatus: "none" | "pending" | "approved" | "rejected";
 }): string {
@@ -828,6 +846,7 @@ function formatAgentCard(user: {
     `<b>Telegram ID:</b> <code>${user.telegramId}</code>`,
     `<b>Username:</b> ${escapeHtml(user.username ? `@${user.username}` : "не указан")}`,
     `<b>Роль:</b> ${getRoleText(user.role)}`,
+    `<b>Команда:</b> ${getSquadText(user.squad)}`,
     `<b>Статус:</b> ${getUserActivityText(user.isActive)}`,
     `<b>Заявка:</b> ${getAccessRequestStatusText(user.accessRequestStatus)}`
   ].join("\n");
@@ -869,6 +888,16 @@ function getAgentRoleButtons(telegramId: number) {
   ];
 }
 
+function getSquadButtons(telegramId: number) {
+  return [
+    [
+      Markup.button.callback("🟦 Dan", `agentsquad:${telegramId}:dan`),
+      Markup.button.callback("🟩 Aroirken", `agentsquad:${telegramId}:aroirken`),
+      Markup.button.callback("🟨 LiamKizz", `agentsquad:${telegramId}:liamkizz`)
+    ]
+  ];
+}
+
 function getAgentDetailsMarkup(user: { telegramId: number; isActive: boolean }) {
   const managedUser = getUser(user.telegramId);
   const isOwnerUser = managedUser?.role === "owner";
@@ -879,6 +908,7 @@ function getAgentDetailsMarkup(user: { telegramId: number; isActive: boolean }) 
 
   return Markup.inlineKeyboard([
     ...getAgentRoleButtons(user.telegramId),
+    ...getSquadButtons(user.telegramId),
     [
       Markup.button.callback(
         user.isActive ? "Деактивировать" : "Активировать",
@@ -937,6 +967,7 @@ async function showProfile(ctx: BotContext): Promise<void> {
     [
         `<b>👤 Профиль: ${escapeHtml(user.firstName)}</b>`,
         `Роль: ${getRoleText(user.role)}`,
+        `Команда: ${getSquadText(user.squad)}`,
         `Статус: ${getUserActivityText(user.isActive)}`,
       "",
         `<b>Статистика</b>`,
@@ -1044,7 +1075,19 @@ async function showMyForms(ctx: BotContext): Promise<void> {
 }
 
 async function showPendingModeration(ctx: BotContext): Promise<void> {
-  const forms = getPendingForms();
+  const from = extractTelegramUser(ctx);
+  const user = getUser(from.telegramId);
+
+  let forms: FormRecord[];
+  if (user?.role === "owner") {
+    forms = getPendingForms();
+  } else {
+    if (!user?.squad) {
+      await ctx.reply("⚠️ <b>Вам не назначена команда</b>\nОбратитесь к owner.", { parse_mode: "HTML" });
+      return;
+    }
+    forms = getPendingForms(user.squad);
+  }
 
   if (forms.length === 0) {
     await ctx.reply("🛡 <b>Очередь модерации</b>\nСейчас анкет на модерации нет.", { parse_mode: "HTML" });
@@ -1137,6 +1180,15 @@ async function showAgentsList(ctx: BotContext): Promise<void> {
 }
 
 function startFormCreation(ctx: BotContext): Promise<Message.TextMessage> {
+  const from = extractTelegramUser(ctx);
+  const user = getUser(from.telegramId);
+
+  if (user?.role !== "owner" && !user?.squad) {
+    return ctx.reply("⚠️ <b>Вам не назначена команда</b>\nОбратитесь к owner для назначения команды.", {
+      parse_mode: "HTML"
+    });
+  }
+
   ctx.session.newForm = undefined;
   return ctx.reply("<b>📝 Создание новой анкеты</b>\n\nВыберите, какую анкету хотите отправить:", {
     parse_mode: "HTML",
@@ -1210,11 +1262,13 @@ async function finalizeFormCreation(ctx: BotContext): Promise<void> {
   }
 
   const from = extractTelegramUser(ctx);
+  const user = getUser(from.telegramId);
   const form = createForm({
     formType: ctx.session.newForm.formType,
     agentTelegramId: from.telegramId,
     agentUsername: from.username,
     photoFileId: ctx.session.newForm.photoFileId ?? null,
+    squad: user?.squad ?? null,
     draft: ctx.session.newForm.draft as FormDraft
   });
 
@@ -1939,6 +1993,11 @@ bot.on("callback_query", async (ctx) => {
       return;
     }
 
+    if (!isOwner && user?.squad !== form.squad) {
+      await ctx.answerCbQuery("Нет доступа к этой анкете");
+      return;
+    }
+
     await ctx.answerCbQuery();
     await ctx.deleteMessage().catch(() => undefined);
     await sendFormDetailsMessage(ctx, form, getModerationDetailsMarkup(form.id, isOwner));
@@ -1958,6 +2017,11 @@ bot.on("callback_query", async (ctx) => {
 
     if (!form || form.moderationStatus !== "pending") {
       await ctx.answerCbQuery("Анкета не найдена");
+      return;
+    }
+
+    if (!isOwner && user?.squad !== form.squad) {
+      await ctx.answerCbQuery("Нет доступа к этой анкете");
       return;
     }
 
@@ -1981,6 +2045,15 @@ bot.on("callback_query", async (ctx) => {
       return;
     }
 
+    const currentForm = getFormById(formId);
+    const currentUser = getUser(from.telegramId);
+    const isOwner = currentUser?.role === "owner";
+
+    if (!currentForm || currentForm.moderationStatus !== "pending" || (!isOwner && currentUser?.squad !== currentForm.squad)) {
+      await ctx.answerCbQuery("Анкета не найдена");
+      return;
+    }
+
     const form = approveForm(formId, from.telegramId, team);
     if (!form) {
       await ctx.answerCbQuery("Анкета не найдена");
@@ -1999,6 +2072,24 @@ bot.on("callback_query", async (ctx) => {
       ].join("\n"),
       { parse_mode: "HTML" }
     );
+
+    const hrRole = team === "mason" ? "hr_mason" : "hr_huntme";
+    const hrUsers = getUsersByRoles([hrRole as Role, "hr"]);
+    for (const hrUser of hrUsers) {
+      try {
+        await bot.telegram.sendMessage(
+          hrUser.telegramId,
+          [
+            `<b>📬 Новая анкета направлена в ${escapeHtml(getHrTeamText(team))}</b>`,
+            `Тип: ${getFormTypeText(form.formType)}`,
+            `Анкета: #${form.id} • ${escapeHtml(form.candidateName)}`
+          ].join("\n"),
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        console.error("Failed to notify HR user", error);
+      }
+    }
     return;
   }
 
@@ -2009,6 +2100,14 @@ bot.on("callback_query", async (ctx) => {
     }
 
     const formId = Number(data.split(":")[1]);
+    const form = getFormById(formId);
+    const user = getUser(from.telegramId);
+
+    if (!form || form.moderationStatus !== "pending" || (user?.role !== "owner" && user?.squad !== form.squad)) {
+      await ctx.answerCbQuery("Анкета не найдена");
+      return;
+    }
+
     ctx.session.rejectionFormId = formId;
     await ctx.answerCbQuery();
     await ctx.reply(`❌ <b>Отказ по анкете #${formId}</b>\nВведите причину отказа одним сообщением.`, {
@@ -2233,6 +2332,58 @@ bot.on("callback_query", async (ctx) => {
     return;
   }
 
+  if (data.startsWith("agentsquad:")) {
+    if (!requireRole(ctx, ["owner"])) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const [, telegramIdRaw, squadRaw] = data.split(":");
+    const telegramId = Number(telegramIdRaw);
+    const squad = squadRaw as Squad;
+
+    if (!squads.includes(squad)) {
+      await ctx.answerCbQuery("Неизвестная команда");
+      return;
+    }
+
+    const managedUser = getUser(telegramId);
+
+    if (!managedUser) {
+      await ctx.answerCbQuery("Пользователь не найден");
+      return;
+    }
+
+    if (managedUser.role === "owner") {
+      await ctx.answerCbQuery("Owner менять нельзя");
+      return;
+    }
+
+    const updatedUser = setUserSquad(telegramId, squad);
+
+    if (!updatedUser) {
+      await ctx.answerCbQuery("Пользователь не найден");
+      return;
+    }
+
+    await ctx.answerCbQuery("✅ Команда обновлена");
+    await ctx.editMessageText(formatAgentCard(updatedUser), {
+      parse_mode: "HTML",
+      ...getAgentDetailsMarkup(updatedUser)
+    });
+
+    try {
+      await bot.telegram.sendMessage(
+        telegramId,
+        `✅ <b>Вам назначена команда</b>\n${getSquadText(squad)}`,
+        { parse_mode: "HTML" }
+      );
+    } catch (error) {
+      console.error("Failed to notify user about squad change", error);
+    }
+    return;
+  }
+
   if (data.startsWith("accessapprove:")) {
     if (!requireRole(ctx, ["admin", "owner"])) {
       await ctx.answerCbQuery();
@@ -2240,6 +2391,34 @@ bot.on("callback_query", async (ctx) => {
     }
 
     const telegramId = Number(data.split(":")[1]);
+    const currentUser = getUser(from.telegramId);
+
+    if (currentUser?.role === "owner") {
+      const targetUser = getUser(telegramId);
+      if (!targetUser || targetUser.accessRequestStatus !== "pending") {
+        await ctx.answerCbQuery("Заявка не найдена");
+        return;
+      }
+
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        [
+          "<b>🔐 Выберите команду для пользователя</b>",
+          `<code>${telegramId}</code> • ${escapeHtml(targetUser.firstName)}`
+        ].join("\n"),
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("🟦 Dan Squad", `accesssquad:${telegramId}:dan`)],
+            [Markup.button.callback("🟩 Aroirken Squad", `accesssquad:${telegramId}:aroirken`)],
+            [Markup.button.callback("🟨 LiamKizz Squad", `accesssquad:${telegramId}:liamkizz`)],
+            [Markup.button.callback("❌ Отклонить", `accessreject:${telegramId}`)]
+          ])
+        }
+      );
+      return;
+    }
+
     const approvedUser = approveAccessRequest(telegramId, "agent");
 
     if (!approvedUser) {
@@ -2251,7 +2430,8 @@ bot.on("callback_query", async (ctx) => {
     await ctx.editMessageText(
       [
         "<b>✅ Заявка обработана</b>",
-        `Пользователь <code>${telegramId}</code> получил доступ с ролью <b>agent</b>.`
+        `Пользователь <code>${telegramId}</code> получил доступ с ролью <b>agent</b>.`,
+        `Команда: <b>Не назначена</b> (назначить может owner)`
       ].join("\n"),
       { parse_mode: "HTML" }
     );
@@ -2262,6 +2442,58 @@ bot.on("callback_query", async (ctx) => {
         [
           "<b>✅ Доступ одобрен</b>",
           "Вам выдана роль <b>agent</b>.",
+          "Теперь вы можете пользоваться ботом."
+        ].join("\n"),
+        {
+          parse_mode: "HTML",
+          ...mainKeyboard("agent")
+        }
+      );
+    } catch (error) {
+      console.error("Failed to notify approved user", error);
+    }
+    return;
+  }
+
+  if (data.startsWith("accesssquad:")) {
+    if (!requireRole(ctx, ["owner"])) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const [, telegramIdRaw, squadRaw] = data.split(":");
+    const telegramId = Number(telegramIdRaw);
+    const squad = squadRaw as Squad;
+
+    if (!squads.includes(squad)) {
+      await ctx.answerCbQuery("Неизвестная команда");
+      return;
+    }
+
+    const approvedUser = approveAccessRequest(telegramId, "agent", squad);
+
+    if (!approvedUser) {
+      await ctx.answerCbQuery("Заявка не найдена");
+      return;
+    }
+
+    await ctx.answerCbQuery("✅ Доступ выдан");
+    await ctx.editMessageText(
+      [
+        "<b>✅ Заявка обработана</b>",
+        `Пользователь <code>${telegramId}</code> получил доступ с ролью <b>agent</b>.`,
+        `Команда: <b>${getSquadText(squad)}</b>`
+      ].join("\n"),
+      { parse_mode: "HTML" }
+    );
+
+    try {
+      await bot.telegram.sendMessage(
+        telegramId,
+        [
+          "<b>✅ Доступ одобрен</b>",
+          "Вам выдана роль <b>agent</b>.",
+          `Команда: <b>${getSquadText(squad)}</b>`,
           "Теперь вы можете пользоваться ботом."
         ].join("\n"),
         {

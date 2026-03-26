@@ -10,6 +10,7 @@ import {
   HrTeam,
   ProfileStats,
   Role,
+  Squad,
   UserRecord,
   WorkflowStatus,
   workflowStatuses
@@ -31,6 +32,7 @@ function normalizeFormRecord(form: FormRecord): FormRecord {
     ...form,
     formType: form.formType ?? "operator",
     hrTeam: form.hrTeam ?? null,
+    squad: form.squad ?? null,
     photoFileId: form.photoFileId ?? null,
     interviewDate: form.interviewDate ?? null,
     phoneNumber: form.phoneNumber ?? "",
@@ -43,6 +45,7 @@ function normalizeUserRecord(user: UserRecord): UserRecord {
   return {
     ...user,
     isActive: user.isActive ?? true,
+    squad: user.squad ?? null,
     accessRequestStatus: user.accessRequestStatus ?? "none",
     accessRequestedAt: user.accessRequestedAt ?? null
   };
@@ -116,6 +119,7 @@ export function upsertUser(user: {
   const createdUser: UserRecord = {
     ...user,
     role: null,
+    squad: null,
     isActive: true,
     accessRequestStatus: "none",
     accessRequestedAt: null,
@@ -190,6 +194,20 @@ export function setUserActive(telegramId: number, isActive: boolean): UserRecord
   return user;
 }
 
+export function setUserSquad(telegramId: number, squad: Squad | null): UserRecord | null {
+  const state = readDatabase();
+  const user = state.users.find((entry) => entry.telegramId === telegramId);
+
+  if (!user) {
+    return null;
+  }
+
+  user.squad = squad;
+  user.updatedAt = nowIso();
+  writeDatabase(state);
+  return user;
+}
+
 export function getUsersByRoles(roleList: Role[]): UserRecord[] {
   const state = readDatabase();
   return state.users.filter((entry) => entry.role !== null && roleList.includes(entry.role));
@@ -211,7 +229,7 @@ export function createAccessRequest(telegramId: number): UserRecord | null {
   return user;
 }
 
-export function approveAccessRequest(telegramId: number, role: Role = "agent"): UserRecord | null {
+export function approveAccessRequest(telegramId: number, role: Role = "agent", squad: Squad | null = null): UserRecord | null {
   const state = readDatabase();
   const user = state.users.find((entry) => entry.telegramId === telegramId);
 
@@ -220,6 +238,7 @@ export function approveAccessRequest(telegramId: number, role: Role = "agent"): 
   }
 
   user.role = role;
+  user.squad = squad;
   user.isActive = true;
   user.accessRequestStatus = "approved";
   user.updatedAt = nowIso();
@@ -246,6 +265,7 @@ export function createForm(payload: {
   agentTelegramId: number;
   agentUsername: string | null;
   photoFileId?: string | null;
+  squad?: Squad | null;
   draft: FormDraft;
 }): FormRecord {
   const state = readDatabase();
@@ -259,6 +279,7 @@ export function createForm(payload: {
     agentTelegramId: payload.agentTelegramId,
     agentUsername: payload.agentUsername,
     hrTeam: null,
+    squad: payload.squad ?? null,
     photoFileId: payload.photoFileId ?? null,
     candidateName: payload.draft.candidateName,
     age: payload.draft.age,
@@ -368,10 +389,10 @@ export function searchFormsByUserQuery(query: string): FormRecord[] {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function getPendingForms(): FormRecord[] {
+export function getPendingForms(squad?: Squad): FormRecord[] {
   const state = readDatabase();
   return state.forms
-    .filter((entry) => entry.moderationStatus === "pending")
+    .filter((entry) => entry.moderationStatus === "pending" && (!squad || entry.squad === squad))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 

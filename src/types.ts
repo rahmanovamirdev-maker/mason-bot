@@ -21,6 +21,9 @@ export type WorkflowStatus = (typeof workflowStatuses)[number];
 export const formTypes = ["operator", "model"] as const;
 export type FormType = (typeof formTypes)[number];
 
+export const squads = ["dan", "aroirken", "liamkizz"] as const;
+export type Squad = (typeof squads)[number];
+
 export type FormFieldKey =
   | "candidateName"
   | "age"
@@ -41,6 +44,7 @@ export interface UserRecord {
   firstName: string;
   lastName: string | null;
   role: Role | null;
+  squad: Squad | null;
   isActive: boolean;
   accessRequestStatus: AccessRequestStatus;
   accessRequestedAt: string | null;
@@ -54,6 +58,7 @@ export interface FormRecord {
   agentTelegramId: number;
   agentUsername: string | null;
   hrTeam: HrTeam | null;
+  squad: Squad | null;
   photoFileId: string | null;
   candidateName: string;
   age: string;
