@@ -60,6 +60,8 @@ interface SessionData {
   hrRejectionFormId?: number;
   awaitingFormsSearch?: boolean;
   searchFormsQuery?: string;
+  awaitingBroadcast?: boolean;
+  broadcastText?: string;
 }
 
 interface BotContext extends Context {
@@ -105,7 +107,8 @@ const menuLabels = {
   archive: "🗃 Архив анкет",
   searchForms: "🔎 Поиск анкет",
   agents: "👥 Пользователи",
-  botStats: "📊 Статистика бота"
+  botStats: "📊 Статистика бота",
+  broadcast: "📢 Рассылка"
 } as const;
 
 function escapeHtml(value: string | number): string {
@@ -675,6 +678,7 @@ function mainKeyboard(roles: Role[]) {
     buttons.push([Markup.button.text(menuLabels.archive)]);
     buttons.push([Markup.button.text(menuLabels.searchForms)]);
     buttons.push([Markup.button.text(menuLabels.agents)]);
+    buttons.push([Markup.button.text(menuLabels.broadcast)]);
   }
 
   return Markup.keyboard(buttons).resize();
@@ -1698,6 +1702,24 @@ bot.hears(menuLabels.searchForms, async (ctx) => {
   await promptFormsSearch(ctx);
 });
 
+bot.hears(menuLabels.broadcast, async (ctx) => {
+  if (!requireRole(ctx, ["owner"])) {
+    return;
+  }
+
+  ctx.session.awaitingBroadcast = true;
+  await ctx.reply(
+    [
+      "<b>📢 Рассылка</b>",
+      "",
+      "Напишите сообщение, которое будет отправлено <b>всем</b> пользователям.",
+      "",
+      "Для отмены нажмите /cancel"
+    ].join("\n"),
+    { parse_mode: "HTML" }
+  );
+});
+
 bot.on("callback_query", async (ctx) => {
   const data = "data" in ctx.callbackQuery ? ctx.callbackQuery.data : undefined;
   if (!data) {
@@ -1786,6 +1808,60 @@ bot.on("callback_query", async (ctx) => {
 
   if (data === "noop") {
     await ctx.answerCbQuery();
+    return;
+  }
+
+  if (data === "broadcast:confirm") {
+    if (!requireRole(ctx, ["owner"])) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const text = ctx.session.broadcastText;
+    ctx.session.broadcastText = undefined;
+
+    if (!text) {
+      await ctx.answerCbQuery("Сообщение не найдено");
+      return;
+    }
+
+    await ctx.answerCbQuery("Рассылка запущена...");
+    await ctx.editMessageText("⏳ <b>Рассылка отправляется...</b>", { parse_mode: "HTML" });
+
+    const activeUsers = getAllUsers().filter((u) => u.isActive);
+    let sent = 0;
+    let failed = 0;
+
+    for (const user of activeUsers) {
+      try {
+        await bot.telegram.sendMessage(user.telegramId, text);
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+
+    await ctx.editMessageText(
+      [
+        "<b>📢 Рассылка завершена</b>",
+        "",
+        `✅ Отправлено: <b>${sent}</b>`,
+        failed > 0 ? `❌ Не доставлено: <b>${failed}</b>` : ""
+      ].filter(Boolean).join("\n"),
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  if (data === "broadcast:cancel") {
+    if (!requireRole(ctx, ["owner"])) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    ctx.session.broadcastText = undefined;
+    await ctx.answerCbQuery("Отменено");
+    await ctx.editMessageText("❌ <b>Рассылка отменена</b>", { parse_mode: "HTML" });
     return;
   }
 
@@ -2763,6 +2839,49 @@ bot.on("photo", async (ctx) => {
 });
 
 bot.on("text", async (ctx) => {
+  if (ctx.session.awaitingBroadcast) {
+    if (!requireRole(ctx, ["owner"])) {
+      return;
+    }
+
+    const text = ctx.message.text.trim();
+
+    if (text === "/cancel") {
+      ctx.session.awaitingBroadcast = undefined;
+      await ctx.reply("❌ <b>Рассылка отменена</b>", { parse_mode: "HTML" });
+      return;
+    }
+
+    if (!text) {
+      await ctx.reply("⚠️ <b>Сообщение пустое</b>\nНапишите текст для рассылки.", { parse_mode: "HTML" });
+      return;
+    }
+
+    const allUsers = getAllUsers();
+    const activeUsers = allUsers.filter((u) => u.isActive);
+
+    ctx.session.awaitingBroadcast = undefined;
+    ctx.session.broadcastText = text;
+
+    await ctx.reply(
+      [
+        "<b>📢 Предпросмотр рассылки</b>",
+        "",
+        text,
+        "",
+        `Будет отправлено <b>${activeUsers.length}</b> активным пользователям из <b>${allUsers.length}</b>.`
+      ].join("\n"),
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("✅ Отправить", "broadcast:confirm")],
+          [Markup.button.callback("❌ Отменить", "broadcast:cancel")]
+        ])
+      }
+    );
+    return;
+  }
+
   if (ctx.session.hrRejectionFormId) {
     if (!requireRole(ctx, ["hr", "hr_mason", "hr_huntme", "owner"])) {
       return;
