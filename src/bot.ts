@@ -866,17 +866,63 @@ function getAgentsListText(count: number): string {
   ].join("\n");
 }
 
-function getAgentsListMarkup() {
-  const agents = getAllUsers();
+function getSquadShort(squad: Squad | null): string {
+  switch (squad) {
+    case "dan": return "🟦";
+    case "aroirken": return "🟩";
+    case "liamkizz": return "🟨";
+    default: return "";
+  }
+}
 
-  return Markup.inlineKeyboard(
-    agents.map((user: UserRecord) => [
-      Markup.button.callback(
-        `${user.isActive ? "●" : "○"} ${truncateLabel(user.firstName)} • ${truncateLabel(user.roles.length ? user.roles.join(",") : "без роли", 12)} • #${user.telegramId}`,
-        `agentview:${user.telegramId}`
-      )
-    ])
-  );
+function getAgentsListMarkup() {
+  const users = getAllUsers();
+
+  const rolePriority: Role[] = ["owner", "admin", "hr", "hr_mason", "hr_huntme", "agent"];
+  const roleLabels: Record<string, string> = {
+    owner: "👑 Owner",
+    admin: "🔑 Admin",
+    hr: "📋 HR",
+    hr_mason: "📋 HR Mason",
+    hr_huntme: "📋 HR HuntMe",
+    agent: "👤 Agent",
+    none: "⚪ Без роли"
+  };
+
+  const assigned = new Set<number>();
+  const grouped = new Map<string, UserRecord[]>();
+
+  for (const role of rolePriority) {
+    const group: UserRecord[] = [];
+    for (const user of users) {
+      if (!assigned.has(user.telegramId) && user.roles.includes(role)) {
+        group.push(user);
+        assigned.add(user.telegramId);
+      }
+    }
+    if (group.length > 0) grouped.set(role, group);
+  }
+
+  const noRole = users.filter((u) => !assigned.has(u.telegramId));
+  if (noRole.length > 0) grouped.set("none", noRole);
+
+  const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+
+  for (const [key, group] of grouped) {
+    buttons.push([Markup.button.callback(`── ${roleLabels[key]} (${group.length}) ──`, "noop")]);
+    for (const user of group) {
+      const sq = getSquadShort(user.squad);
+      const extra = user.roles.length > 1 ? ` [+${user.roles.length - 1}]` : "";
+      buttons.push([
+        Markup.button.callback(
+          `${user.isActive ? "●" : "○"} ${truncateLabel(user.firstName)}${extra}${sq ? " " + sq : ""}`,
+          `agentview:${user.telegramId}`
+        )
+      ]);
+    }
+  }
+
+  return Markup.inlineKeyboard(buttons);
 }
 
 function getAgentRoleButtons(telegramId: number, currentRoles: Role[]) {
@@ -1670,6 +1716,11 @@ bot.on("callback_query", async (ctx) => {
   }
 
   if (data === "searchpage:noop") {
+    await ctx.answerCbQuery();
+    return;
+  }
+
+  if (data === "noop") {
     await ctx.answerCbQuery();
     return;
   }
