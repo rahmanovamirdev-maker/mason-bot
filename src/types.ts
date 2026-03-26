@@ -13,6 +13,7 @@ export type ModerationStatus = (typeof moderationStatuses)[number];
 export const workflowStatuses = [
   "на рассмотрении",
   "назначено собеседование",
+  "не пришел(ла)",
   "отказано",
   "регистрация"
 ] as const;

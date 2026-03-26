@@ -211,6 +211,8 @@ function getWorkflowText(status: WorkflowStatus): string {
       return "⏳ На рассмотрении";
     case "назначено собеседование":
       return "📅 Назначено собеседование";
+    case "не пришел(ла)":
+      return "🚫 Не пришел(ла)";
     case "отказано":
       return "✖ Отказано";
     case "регистрация":
@@ -268,6 +270,8 @@ function getWorkflowCompactText(status: WorkflowStatus): string {
       return "⏳ Рассм";
     case "назначено собеседование":
       return "📅 Собес";
+    case "не пришел(ла)":
+      return "🚫 Неявка";
     case "отказано":
       return "✖ Отказ";
     case "регистрация":
