@@ -757,7 +757,7 @@ function getHrFormsListMarkup(forms: FormRecord[]) {
   return Markup.inlineKeyboard(
     forms.map((form) => [
       Markup.button.callback(
-        `${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
+        `${getSquadShort(form.squad)} ${getHrTeamText(form.hrTeam)} • ${form.formType === "operator" ? "ОП" : "МД"} #${form.id} • ${truncateLabel(form.candidateName)}`,
         `hrview:${form.id}`
       )
     ])
