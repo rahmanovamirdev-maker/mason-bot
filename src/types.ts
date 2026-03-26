@@ -43,7 +43,7 @@ export interface UserRecord {
   username: string | null;
   firstName: string;
   lastName: string | null;
-  role: Role | null;
+  roles: Role[];
   squad: Squad | null;
   isActive: boolean;
   accessRequestStatus: AccessRequestStatus;

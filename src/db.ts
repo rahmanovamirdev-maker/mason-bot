@@ -42,8 +42,11 @@ function normalizeFormRecord(form: FormRecord): FormRecord {
 }
 
 function normalizeUserRecord(user: UserRecord): UserRecord {
+  const legacyRole = (user as any).role;
+  const roles: Role[] = user.roles?.length ? user.roles : (legacyRole ? [legacyRole] : []);
   return {
     ...user,
+    roles,
     isActive: user.isActive ?? true,
     squad: user.squad ?? null,
     accessRequestStatus: user.accessRequestStatus ?? "none",
@@ -118,7 +121,7 @@ export function upsertUser(user: {
 
   const createdUser: UserRecord = {
     ...user,
-    role: null,
+    roles: [],
     squad: null,
     isActive: true,
     accessRequestStatus: "none",
@@ -140,7 +143,9 @@ export function ensureOwnerRole(telegramId: number): void {
     return;
   }
 
-  user.role = "owner";
+  if (!user.roles.includes("owner")) {
+    user.roles.push("owner");
+  }
   user.isActive = true;
   user.accessRequestStatus = "approved";
   user.updatedAt = nowIso();
@@ -160,9 +165,30 @@ export function setUserRole(telegramId: number, role: Role): UserRecord | null {
     return null;
   }
 
-  user.role = role;
+  if (!user.roles.includes(role)) {
+    user.roles.push(role);
+  }
   user.isActive = true;
   user.accessRequestStatus = "approved";
+  user.updatedAt = nowIso();
+  writeDatabase(state);
+  return user;
+}
+
+export function toggleUserRole(telegramId: number, role: Role): UserRecord | null {
+  const state = readDatabase();
+  const user = state.users.find((entry) => entry.telegramId === telegramId);
+
+  if (!user) {
+    return null;
+  }
+
+  const index = user.roles.indexOf(role);
+  if (index >= 0) {
+    user.roles.splice(index, 1);
+  } else {
+    user.roles.push(role);
+  }
   user.updatedAt = nowIso();
   writeDatabase(state);
   return user;
@@ -171,7 +197,7 @@ export function setUserRole(telegramId: number, role: Role): UserRecord | null {
 export function getAgentUsers(): UserRecord[] {
   const state = readDatabase();
   return state.users
-    .filter((entry) => entry.role === "agent")
+    .filter((entry) => entry.roles.includes("agent"))
     .sort((left, right) => left.firstName.localeCompare(right.firstName, "ru"));
 }
 
@@ -210,7 +236,7 @@ export function setUserSquad(telegramId: number, squad: Squad | null): UserRecor
 
 export function getUsersByRoles(roleList: Role[]): UserRecord[] {
   const state = readDatabase();
-  return state.users.filter((entry) => entry.role !== null && roleList.includes(entry.role));
+  return state.users.filter((entry) => entry.roles.some((r) => roleList.includes(r)));
 }
 
 export function createAccessRequest(telegramId: number): UserRecord | null {
@@ -237,7 +263,9 @@ export function approveAccessRequest(telegramId: number, role: Role = "agent", s
     return null;
   }
 
-  user.role = role;
+  if (!user.roles.includes(role)) {
+    user.roles.push(role);
+  }
   user.squad = squad;
   user.isActive = true;
   user.accessRequestStatus = "approved";
